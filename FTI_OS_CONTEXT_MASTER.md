@@ -1,7 +1,7 @@
 # FTI OS — CONTEXT MASTER
 
-Version : 1.0
-Date : 2026-05-17
+Version : 2.0
+Date : 2026-05-18
 Statut : ACTIF
 
 ---
@@ -129,7 +129,108 @@ Projets validés :
 À traiter :
 - 2026_KEBO_GROUP_GLOBAL
 - 2026_CAMNEDIS_GUINEA_GOLD_FTI
-- 2026_GOLD_NETWORK_CONGO
+- 2026_GOLD_NETWORK_CONGO ← TEST TEMPLATE v2.1 EN COURS
+
+---
+
+# MILESTONE SESSION 2026-05-18
+
+## Workflow AMARYACO — VALIDÉ
+- Commit : 636773a
+- Deal   : 2026_AMARYACO_DLC_2.249M_USD_FTI
+- Doc ID Odoo : 2868
+- CRM ID : 2973
+- Dossier : 07_CHAÎNE_BANCAIRE
+- Statut  : WAITING_CLIENT_SIGNATURE
+
+## Template ENGINE v2 — COMMITTÉ
+- Commit : 4b9d413
+- Tag    : FTI_OS_TEMPLATE_v2
+- Fichier : workflows/FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.json
+
+## Template ENGINE v2.1 — FIXES CRITIQUES — ACTUEL
+- Commit : 5997aba
+- Tag    : FTI_OS_TEMPLATE_v2.1
+- Fichier : workflows/FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.1.json
+- Fixes  :
+  - N06 : alwaysOutputData = true
+  - N12 : mail.message/create (plus crm.lead/message_post)
+  - N12 : vals_list sans subtype_xmlid
+  - N10 : limit:1 forcé
+  - n8n : RAW pour expressions
+
+---
+
+# RÉFÉRENCE TECHNIQUE ODOO JSON/2
+
+## Endpoints validés
+- POST /json/2/documents.document/search_read
+- POST /json/2/documents.document/create
+- POST /json/2/crm.lead/search_read
+- POST /json/2/mail.message/create
+
+## Endpoints abandonnés
+- /web/dataset/call_kw → 404
+- /json/2/documents.folder → 404
+- crm.lead/message_post → erreur singleton
+
+## Auth
+- Authorization: Bearer TOKEN
+- Content-Type: application/json
+
+## Body chatter validé
+POST /json/2/mail.message/create
+{
+  "vals_list": [{
+    "model": "crm.lead",
+    "res_id": <leadId>,
+    "body": "<HTML>",
+    "message_type": "comment"
+  }]
+}
+
+## Body create document validé
+POST /json/2/documents.document/create
+{
+  "vals_list": [{
+    "name": "<docName>",
+    "type": "url",
+    "url": "<dropboxUrl>",
+    "folder_id": <folderId>
+  }]
+}
+
+## Pièges n8n
+- Using JSON + ={{ }} → erreur → utiliser RAW
+- 0 items → n8n stoppe → Always Output Data = true sur N06
+- Merge node bloque si branche vide → éviter
+- Noms variables : token/docName/dealName (pas jeton/Nom du document)
+
+---
+
+# REPO GITHUB
+
+fredtradesn-arch/fredtrade-ai-infrastructure
+
+workflows/
+  FTI_OS_DROPBOX_TO_ODOO_CRM_v1.json          (636773a)
+  FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.json  (4b9d413)
+  FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.1.json (5997aba) ← ACTUEL
+
+---
+
+# TEST EN ATTENTE
+
+DEAL  : 2026_GOLD_NETWORK_CONGO_FTI
+DOC   : 2026-05-18_FTI_TEMPLATE_V2_TEST_GOLD_NETWORK.pdf
+URL   : https://www.dropbox.com/
+DOSSIER : 04_COMMUNICATION
+STATUS  : TEST_TEMPLATE_V2
+
+EN ATTENTE :
+- Rotation token Odoo (révocation e42dbe1f...)
+- 5 outputs n8n : N02/N06/N09/N10/N12
+- GO/NO-GO template v2.1
 
 ---
 
@@ -140,12 +241,13 @@ Projets validés :
 - Audit factures orphelines
 - Politique documentaire Odoo
 - Protocole doublon CAMNEDIS
+- Rotation token Odoo ← PRIORITAIRE
 
 ---
 
 # MOT DE REPRISE
 
-N8_suite_6
+N8_suite_10
 
 ---
 
@@ -155,6 +257,7 @@ N8_suite_6
 - FTI_OS_AUDIT_LOG.md
 - fti_audit_v3.py
 - fti_rename_controlled.py
+- workflows/FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.1.json ← MOTEUR ACTUEL
 
 ---
 
@@ -186,4 +289,4 @@ Claude :
 FTI OS — ODOO OPERATOR
 
 Reprise :
-N8_suite_6
+N8_suite_10
