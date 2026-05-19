@@ -1,0 +1,604 @@
+{
+  "name": "FTI_OS_DROPBOX_TO_ODOO_CRM_TEMPLATE_v2.2_DEV",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-01",
+      "name": "N01-Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "notes": "Manuel pour tests. Remplacer par Webhook pour prod."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FTI OS — N02-Config — SOURCE DE VÉRITÉ UNIQUE\n// Tous les champs produits ici — jamais reconstruits ailleurs\n// ============================================================\nconst odooUrl    = $env.ODOO_URL    || 'https://fredtrade-sn.odoo.com';\nconst token      = $env.ODOO_BEARER_TOKEN || '';\nconst authHeader = 'Bearer ' + token;\n\n// Variables deal\nconst dealName   = $env.DEAL_NAME   || 'DEAL_NAME_NON_DEFINI';\nconst docName    = $env.DOC_NAME    || 'DOC_NAME_NON_DEFINI';\nconst dropboxUrl = $env.DROPBOX_URL || 'https://www.dropbox.com/';\nconst folderName = $env.FOLDER_NAME || 'BUYER_BANK';\nconst status     = $env.STATUS      || 'WAITING_CLIENT_SIGNATURE';\nconst tags       = $env.TAGS        || 'FTI_OS';\nconst docType    = $env.DOC_TYPE    || 'CLIENT_APPLICATION';\n\n// Endpoints — centralisés ici\nconst docSearchUrl  = odooUrl + '/json/2/documents.document/search_read';\nconst docCreateUrl  = odooUrl + '/json/2/documents.document/create';\nconst crmSearchUrl  = odooUrl + '/json/2/crm.lead/search_read';\nconst chatterUrl    = odooUrl + '/json/2/mail.message/create';\n\n// Payload folder search — construit ici\nconst searchFolderBody = JSON.stringify({\n  domain: [['name','ilike',folderName],['type','=','folder']],\n  fields: ['id','name','folder_id'],\n  limit: 10\n});\n\n// Payload CRM search — limit:1 forcé\nconst searchCRMBody = JSON.stringify({\n  domain: [['name','ilike',dealName]],\n  fields: ['id','name','stage_id','tag_ids'],\n  limit: 1\n});\n\nreturn [{json:{\n  // Auth — toujours présent\n  odooUrl, token, authHeader,\n  // Deal\n  dealName, docName, dropboxUrl, folderName, status, tags, docType,\n  // Endpoints\n  docSearchUrl, docCreateUrl, crmSearchUrl, chatterUrl,\n  // Payloads pré-construits\n  searchFolderBody, searchCRMBody\n}}];"
+      },
+      "id": "node-02",
+      "name": "N02-Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        300
+      ],
+      "notes": "v2.2 — SOURCE DE VÉRITÉ UNIQUE. Tous les payloads/endpoints/auth construits ici. Ne jamais reconstruire ailleurs."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.docSearchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.searchFolderBody }}",
+        "options": {}
+      },
+      "id": "node-03",
+      "name": "N03-SearchFolder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        540,
+        300
+      ],
+      "notes": "POST /json/2/documents.document/search_read — type=folder"
+    },
+    {
+      "parameters": {
+        "jsCode": "// N04 — AfterFolder\n// Reçoit résultat SearchFolder + enrichit ctx avec folderId\nconst ctx = $('N02-Config').first().json;\nconst records = $input.item.json.records || [];\nconst folderFound = records.length > 0;\nconst folderId    = folderFound ? records[0].id   : null;\nconst folderLabel = folderFound ? records[0].name : null;\n\n// Payload anti-doublon construit ici\nconst checkDocBody = folderFound ? JSON.stringify({\n  domain: [['name','ilike',ctx.docName],['folder_id','=',folderId]],\n  fields: ['id','name','url','folder_id'],\n  limit: 1\n}) : null;\n\n// Propagation complète du contexte N02 + enrichissement\nreturn [{json:{\n  ...ctx,\n  folderId, folderLabel, folderFound, checkDocBody\n}}];"
+      },
+      "id": "node-04",
+      "name": "N04-AfterFolder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ],
+      "notes": "v2.2 REFACTOR — Enrichit ctx avec folderId. Construit checkDocBody. Propage contexte N02 complet."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cf1",
+              "leftValue": "={{ $json.folderFound }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-05",
+      "name": "N05-FolderFound",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        980,
+        300
+      ],
+      "notes": "TRUE=continuer / FALSE=STOP dossier absent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.docSearchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.checkDocBody }}",
+        "options": {}
+      },
+      "id": "node-06",
+      "name": "N06-CheckDoc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "alwaysOutputData": true,
+      "position": [
+        1200,
+        180
+      ],
+      "notes": "v2.1 FIX conservé : alwaysOutputData=true. Anti-doublon name+folder_id."
+    },
+    {
+      "parameters": {
+        "jsCode": "// N07 — AfterDoc — REFACTOR v2.2\n// Context garanti via N04-AfterFolder (qui porte déjà N02)\nconst ctx = $('N04-AfterFolder').first().json;\n\n// Parsing robuste — gère {} et [] \nconst raw = $input.item.json;\nconst records = Array.isArray(raw.records) ? raw.records\n              : (Array.isArray(raw) ? raw : []);\n\nconst docCount    = records.length;\nconst docAbsent   = docCount === 0;\nconst existingDoc = docAbsent ? null : records[0];\n\n// Payload create construit ici si doc absent\nconst createDocBody = docAbsent ? JSON.stringify({\n  vals_list: {\n    name:      ctx.docName,\n    type:      'url',\n    url:       ctx.dropboxUrl,\n    folder_id: ctx.folderId\n  }\n}) : null;\n\n// Propagation complète — authHeader garanti\nreturn [{json:{\n  ...ctx,\n  docCount, docAbsent, existingDoc, createDocBody\n}}];"
+      },
+      "id": "node-07",
+      "name": "N07-AfterDoc",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        180
+      ],
+      "notes": "v2.2 REFACTOR — Context garanti via N04. Plus de hardcoded token. createDocBody construit proprement."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cd1",
+              "leftValue": "={{ $json.docAbsent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-08",
+      "name": "N08-DocAbsent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1640,
+        180
+      ],
+      "notes": "TRUE=créer / FALSE=STOP doublon"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('N07-AfterDoc').first().json.docCreateUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $('N07-AfterDoc').first().json.authHeader }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('N07-AfterDoc').first().json.createDocBody }}",
+        "options": {}
+      },
+      "id": "node-09",
+      "name": "N09-CreateDoc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1860,
+        60
+      ],
+      "notes": "POST /json/2/documents.document/create — vals_list — authHeader dynamique via N07."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('N07-AfterDoc').first().json.crmSearchUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $('N07-AfterDoc').first().json.authHeader }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $('N07-AfterDoc').first().json.searchCRMBody }}",
+        "options": {}
+      },
+      "id": "node-10",
+      "name": "N10-SearchCRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2080,
+        60
+      ],
+      "notes": "POST /json/2/crm.lead/search_read — limit:1 forcé dans N02."
+    },
+    {
+      "parameters": {
+        "jsCode": "// N11 — AfterCRM — REFACTOR v2.2\n// Context garanti via N07-AfterDoc (chaîne complète N02→N04→N07)\nconst ctx = $('N07-AfterDoc').first().json;\n\nconst records  = $input.item.json.records || [];\nconst leadId   = records.length > 0 ? records[0].id   : null;\nconst leadName = records.length > 0 ? records[0].name : null;\n\n// Payload chatter construit ici\nconst chatterBody = leadId ? JSON.stringify({\n  vals_list: [{\n    model:        'crm.lead',\n    res_id:       leadId,\n    body:         '<p><b>FTI OS — Référence documentaire créée</b></p>' +\n                  '<p><b>Deal :</b> '     + ctx.dealName    + '</p>' +\n                  '<p><b>Document :</b> ' + ctx.docName     + '</p>' +\n                  '<p><b>Dossier :</b> '  + ctx.folderLabel + '</p>' +\n                  '<p><b>Type :</b> URL Odoo — Dropbox HTTPS</p>' +\n                  '<p><b>Lien :</b> <a href=\"' + ctx.dropboxUrl + '\">' + ctx.dropboxUrl + '</a></p>' +\n                  '<hr/>' +\n                  '<p>Status : <b>' + ctx.status + '</b></p>' +\n                  '<p>Tags : ' + ctx.tags + '</p>' +\n                  '<p><small>Source : Claude FTI OS — Template v2.2</small></p>',\n    message_type: 'comment'\n  }]\n}) : null;\n\n// authHeader toujours présent via ctx\nreturn [{json:{\n  ...ctx,\n  leadId, leadName, chatterBody\n}}];"
+      },
+      "id": "node-11",
+      "name": "N11-AfterCRM",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2300,
+        60
+      ],
+      "notes": "v2.2 REFACTOR — Context garanti via N07. authHeader dynamique. chatterBody construit proprement."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.chatterUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "={{ $json.authHeader }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.chatterBody }}",
+        "options": {}
+      },
+      "id": "node-12",
+      "name": "N12-PostChatter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2520,
+        60
+      ],
+      "notes": "POST /json/2/mail.message/create — vals_list — sans subtype_xmlid — authHeader dynamique."
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "fti_status",
+              "value": "SUCCESS",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "template",
+              "value": "FTI_OS_TEMPLATE_v2.2",
+              "type": "string"
+            },
+            {
+              "id": "s3",
+              "name": "deal",
+              "value": "={{ $('N11-AfterCRM').first().json.dealName }}",
+              "type": "string"
+            },
+            {
+              "id": "s4",
+              "name": "document",
+              "value": "={{ $('N11-AfterCRM').first().json.docName }}",
+              "type": "string"
+            },
+            {
+              "id": "s5",
+              "name": "folder",
+              "value": "={{ $('N11-AfterCRM').first().json.folderLabel }}",
+              "type": "string"
+            },
+            {
+              "id": "s6",
+              "name": "crm_lead_id",
+              "value": "={{ $('N11-AfterCRM').first().json.leadId }}",
+              "type": "string"
+            },
+            {
+              "id": "s7",
+              "name": "status",
+              "value": "={{ $('N11-AfterCRM').first().json.status }}",
+              "type": "string"
+            },
+            {
+              "id": "s8",
+              "name": "refactor",
+              "value": "N07 context propre / authHeader dynamique / payloads dans N02",
+              "type": "string"
+            },
+            {
+              "id": "s9",
+              "name": "chatter_api",
+              "value": "mail.message/create — vals_list",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-13",
+      "name": "N13-ReportSuccess",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2740,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1",
+              "name": "fti_status",
+              "value": "STOP - Doublon detecte. Aucune creation.",
+              "type": "string"
+            },
+            {
+              "id": "d2",
+              "name": "deal",
+              "value": "={{ $('N07-AfterDoc').first().json.dealName }}",
+              "type": "string"
+            },
+            {
+              "id": "d3",
+              "name": "doc",
+              "value": "={{ $('N07-AfterDoc').first().json.docName }}",
+              "type": "string"
+            },
+            {
+              "id": "d4",
+              "name": "action",
+              "value": "Verifier dans Odoo Documents. Anti-doublon actif.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-14",
+      "name": "N14-StopDuplicate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1860,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "fti_status",
+              "value": "STOP - Dossier introuvable dans Odoo Documents.",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "folder_name",
+              "value": "={{ $('N04-AfterFolder').first().json.folderName }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "action",
+              "value": "Verifier FOLDER_NAME dans env. Aucune creation autorisee.",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-15",
+      "name": "N15-StopNoFolder",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        460
+      ]
+    }
+  ],
+  "connections": {
+    "N01-Trigger": {
+      "main": [
+        [
+          {
+            "node": "N02-Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N02-Config": {
+      "main": [
+        [
+          {
+            "node": "N03-SearchFolder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N03-SearchFolder": {
+      "main": [
+        [
+          {
+            "node": "N04-AfterFolder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N04-AfterFolder": {
+      "main": [
+        [
+          {
+            "node": "N05-FolderFound",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N05-FolderFound": {
+      "main": [
+        [
+          {
+            "node": "N06-CheckDoc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "N15-StopNoFolder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N06-CheckDoc": {
+      "main": [
+        [
+          {
+            "node": "N07-AfterDoc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N07-AfterDoc": {
+      "main": [
+        [
+          {
+            "node": "N08-DocAbsent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N08-DocAbsent": {
+      "main": [
+        [
+          {
+            "node": "N09-CreateDoc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "N14-StopDuplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N09-CreateDoc": {
+      "main": [
+        [
+          {
+            "node": "N10-SearchCRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N10-SearchCRM": {
+      "main": [
+        [
+          {
+            "node": "N11-AfterCRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N11-AfterCRM": {
+      "main": [
+        [
+          {
+            "node": "N12-PostChatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "N12-PostChatter": {
+      "main": [
+        [
+          {
+            "node": "N13-ReportSuccess",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
